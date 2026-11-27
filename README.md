@@ -217,72 +217,141 @@ shares = net_amount * total_shares / total_tokens
 
 
 ---
-## Неделя 10 — Withdraw & Burn Shares
+## Неделя 10 — CPI и вывод из Vault (Withdraw & Burn Shares)
 
 ### Что сделано
 
-- Реализована инструкция `withdraw` — частичный вывод токенов.
-- Реализовано сжигание shares через CPI `Burn`.
-- Реализован возврат токенов через CPI `Transfer` с подписью PDA.
-- Добавлен пропорциональный расчёт суммы вывода.
-- Обновление баланса Vault и UserCard.
-- Проверка достаточного количества shares.
-- Защита от нулевого вывода и вывода из пустого Vault.
+- Реализована инструкция `withdraw`.
+- Пропорциональный расчёт количества возвращаемых токенов.
+- Сжигание share-токенов через CPI `Burn`.
+- Перевод токенов из Vault через CPI `Transfer` с подписью PDA.
+- Обновление `VaultState` и `UserCard`.
+- Проверка суммы вывода, баланса shares и состояния Vault.
 
 ### Формула вывода
 
 `tokens_out = shares_amount × total_tokens / total_shares`
 
+Для промежуточных вычислений используется `u128` с проверкой переполнения.
+
+Пример из тестирования:
+
+| Показатель | До вывода | После вывода |
+|---|---:|---:|
+| Total tokens | 792 | 692 |
+| Total shares | 396 | 346 |
+
+Пользователь A сжигает 50 shares и получает 100 токенов:
+
+`50 × 792 / 396 = 100 tokens`
+
 ### Схема операции
 
-1. Пользователь указывает количество shares.
-2. Контракт рассчитывает количество возвращаемых токенов.
-3. Shares пользователя сжигаются.
-4. Токены переводятся из Vault пользователю.
-5. Обновляются данные VaultState и UserCard.
+```text
+User Share Account
+        |
+        | CPI Burn (User signer)
+        v
+     Share Mint
+
+Vault Token Account
+        |
+        | CPI Transfer (PDA signer)
+        v
+User Token Account
+```
+
+### Инструкции
+
+| Инструкция | Назначение |
+|---|---|
+| `withdraw` | Частичный или полный вывод по количеству shares |
+| `withdraw_all` | Вывод всех shares пользователя |
+| `close_user_card` | Закрытие пустой карточки и возврат rent |
+
+### CPI (Cross-Program Invocation)
+
+CPI — механизм вызова одной программы Solana из другой.
+
+При выводе используются две операции SPL Token Program:
+
+- `Burn` — сжигание share-токенов с подписью пользователя.
+- `Transfer` — перевод токенов из Vault с авторизацией PDA через `CpiContext::new_with_signer`.
 
 ### Мои доработки
 
-- `withdraw_all` — вывод всех доступных пользователю shares.
-- Закрытие пустой UserCard с возвратом rent.
+- Реализован `withdraw_all`.
+- Закрытие UserCard после полного вывода с возвратом rent.
 - Запрет вывода при активной паузе.
-- Проверка сохранности комиссии после вывода всех токенов.
+- Проверка фактического баланса Vault и supply share-токенов.
+- Сохранение комиссии 1% при депозите.
+- Вывод без дополнительной комиссии.
+- Дополнительные проверки безопасности аккаунтов.
 
 ### Solana Explorer (Devnet)
 
-- [Program](https://explorer.solana.com/address/GUCvUxSVPPYudrxDT3RLf3ESEwmiFDJ273iwqoNm1YV2?cluster=devnet)
+**Аккаунты:**
+
+- [Program ID](https://explorer.solana.com/address/GUCvUxSVPPYudrxDT3RLf3ESEwmiFDJ273iwqoNm1YV2?cluster=devnet)
 - [Vault](https://explorer.solana.com/address/3CUgSCVN4UEwUExfrJ7Yz8sSKSZr4k8Ad7jHLKznhiXQ?cluster=devnet)
 - [Token Mint](https://explorer.solana.com/address/FSHWs51onNvKW62GpKKXsoWrHtSfBLaENe95XhrA9556?cluster=devnet)
 - [Share Mint](https://explorer.solana.com/address/HkjBVw8D6R5MjmFdVqcPvMpgcHZDQ6MoDKqLrdGXSTQ3?cluster=devnet)
 - [Fee Wallet](https://explorer.solana.com/address/3XK3QB6ZYYo5o6mSD3f4Eq969eoTFdjMr9Yxk3Gbrazg?cluster=devnet)
+
+**Транзакции:**
+
 - [Initialize Vault](https://explorer.solana.com/tx/6TYziVpAkUa4npPWXC7p9dyp7ixPrH7AC3ycHHi2mgMhkoePnm3YJn9zoRL88WwMhuVeZfwTGjhFKfx6mgCioog?cluster=devnet)
+- [Deposit A](https://explorer.solana.com/tx/5mSDosyPmoKicQLrRSejWgPJEnVaQJRyYtKmbNzQgeX33wDSCuxvg2GiN9Gg8PTCiMadnFetuQNCAe3DBgqYYfU4?cluster=devnet)
+- [Deposit B](https://explorer.solana.com/tx/3msTdDeFMGtTWAHgZT3GPVsUDz1RGsJasmmdXZ6AMuLVQfAzPTumTYDPfVSxCgLx8BZg3ii1AwBMZ3cYNuDDF2JY?cluster=devnet)
+- [Deposit C](https://explorer.solana.com/tx/462D3p2LSyVFDcrioUt72kp8zG6N65aY4xsTSWcUQ7mEMNxwRcBvUjvb9WNdmkwyhiNLJTHUTw4McYhGPZNiqKBJ?cluster=devnet)
 - [Withdraw A — 50 shares → 100 tokens](https://explorer.solana.com/tx/33gd6DTAXEHRgyPGV38UmDwZTqoHD888kQdHotJn4d7g4VSbyWXw4E93jnoMfyWHm5iYro3jt1x5rgTtY3xNoJtr?cluster=devnet)
 - [Withdraw All B — 49.5 shares → 99 tokens](https://explorer.solana.com/tx/31MbamHMG3X7DZYXqwcoMr18H137M8QcW71V64jzWW8qqExNJ16eL4HUiWgNRtg8jcbEEnDXPAbfeUPuRwMYxJco?cluster=devnet)
 
-### Тестирование
+**Inner Instructions:**
 
-- Localnet: 28 passing (16s).
-- Devnet: 28 passing (1m).
-- Добавлено 9 новых тестов.
-- Проверены частичный и полный вывод, недостаток shares, нулевая сумма, пауза, отсутствие карточки, закрытие карточки и опустошение Vault.
-- В тестах искусственно увеличен баланс Vault для проверки пропорционального вывода в соотношении 2:1.
+Ожидаемые CPI-вызовы в транзакциях вывода:
+
+| CPI | Withdraw A | Withdraw All B |
+|---|---:|---:|
+| Burn | 50 shares | 49.5 shares |
+| Transfer | 100 tokens | 99 tokens |
+
+### Тесты
+
+Добавлено 9 новых тестов:
+
+- [x] Частичный вывод.
+- [x] Запрет нулевого вывода.
+- [x] Недостаточно shares.
+- [x] Запрет вывода при паузе.
+- [x] Полный вывод через `withdraw_all`.
+- [x] Закрытие UserCard и возврат rent.
+- [x] Запрет вывода без карточки.
+- [x] Полное опустошение Vault и сохранение комиссии.
+- [x] Запрет вывода из пустого Vault.
+
+**Результаты:**
+
+```text
+Localnet: 28 passing (16s)
+Devnet:   28 passing (1m)
+Deploy:   success
+```
 
 ### Проверьте себя
 
-**1. Какие CPI используются при выводе?**
+**1. Что такое CPI и какие CPI используются при выводе?**
 
-`Burn` — сжигание shares пользователя.  
-`Transfer` — перевод токенов из Vault пользователю.
+Cross-Program Invocation — вызов одной программы Solana из другой. При выводе используются `Burn` для сжигания shares и `Transfer` для возврата токенов пользователю.
 
-**2. Кто подписывает CPI?**
+**2. Кто подписывает CPI при выводе?**
 
-Burn подписывает пользователь — владелец shares. Transfer авторизуется через PDA VaultState с использованием seeds и bump.
+Операцию `Burn` подписывает пользователь, которому принадлежат shares. Для операции `Transfer` используется авторизация PDA VaultState через seeds и bump.
 
-**3. Почему администратор не может напрямую вывести токены из Vault?**
+**3. Почему администратор не может просто забрать токены из Vault?**
 
-Владельцем токен-аккаунта Vault является PDA, а не администратор. В реализованных инструкциях вывод осуществляется через сжигание shares и проверку аккаунтов пользователя.
+Токен-аккаунт Vault контролируется PDA, а не администратором. В текущей реализации вывод возможен только через предусмотренную контрактом инструкцию со сжиганием shares и проверкой аккаунтов.
 
-**Статус:** реализовано и протестировано в Localnet и Devnet. Используются тестовые токены.
 
 ---
 ### Запуск
