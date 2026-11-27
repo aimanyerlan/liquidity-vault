@@ -85,6 +85,139 @@ PDA — адрес, который считается из seeds и ID прог�
 **Как найти карточку конкретного пользователя?**
 Посчитать адрес по seeds `["user_card", vault_state, user]`. Хранить список пользователей не нужно: адрес карточки всегда можно вычислить заново.
 
+---
+
+## Неделя 9. Депозит и выпуск share-токенов
+
+### Что сделано
+
+Добавила инструкцию `deposit`, которая позволяет пользователю
+вносить SPL-токены в vault и получать share-токены пропорционально
+своей доле.
+
+Через CPI Transfer токены переводятся в хранилище, а через
+CPI MintTo программа выпускает share-токены. После депозита
+обновляются данные VaultState и UserCard.
+
+Функционал восьмой недели сохранён.
+
+### Схема депозита
+
+```
+User Token Account
+    ├── 99% ──► Vault Token Account
+    └── 1%  ──► Fee Wallet
+
+VaultState (PDA)
+    ├── MintTo ──► User Share Account
+    ├── обновляет total_tokens и total_shares
+    └── обновляет deposited и shares в UserCard
+```
+
+### Изменения в аккаунтах
+
+| Аккаунт | Новые поля | Назначение |
+|---|---|---|
+| VaultState | total_tokens, total_shares | Учёт токенов и выпущенных shares |
+| VaultState | fee_wallet | Адрес аккаунта для комиссии |
+| UserCard | deposited, shares | Учёт чистых депозитов и начисленных shares |
+| Fee Wallet | PDA: `["fee_wallet", token_mint]` | Хранение комиссии |
+
+### Инструкции
+
+| Инструкция | Кто вызывает | Что делает |
+|---|---|---|
+| `initialize_vault` | админ | Дополнительно создаёт Fee Wallet |
+| `deposit(amount)` | пользователь | Переводит токены, удерживает комиссию и выпускает shares |
+| `close_user_card` | владелец карточки | Закрывает только пустую карточку |
+| `set_paused(bool)` | админ | Приостанавливает создание карточек и депозиты |
+
+### Формула расчёта shares
+
+Для первого вкладчика:
+
+```
+shares = net_amount
+```
+
+Для последующих вкладчиков:
+
+```
+shares = net_amount * total_shares / total_tokens
+```
+
+Где `net_amount` — сумма после вычета комиссии,
+а `total_shares` и `total_tokens` — значения до депозита.
+
+Для защиты от арифметического переполнения используется
+`u128` и checked-операции.
+
+### Мои доработки к заданию
+
+- Комиссия 1%: переводится в отдельный Fee Wallet.
+- Минимальный депозит: 1 токен (1 000 000 минимальных единиц).
+- Пауза: администратор может приостановить депозиты.
+- Тестирование трёх пользователей с разными суммами.
+- Защита от закрытия непустой карточки пользователя.
+- Проверка принадлежности и соответствия токен-аккаунтов.
+
+### Ссылки в Explorer (devnet)
+
+- [Программа](https://explorer.solana.com/address/GUCvUxSVPPYudrxDT3RLf3ESEwmiFDJ273iwqoNm1YV2?cluster=devnet)
+- [VaultState](https://explorer.solana.com/address/A6hEYge4rCYyLKR2khxJpwbw2iV1KJZqwdXdn8h4XWwW?cluster=devnet)
+- [Token Mint](https://explorer.solana.com/address/DKxHZsRzhc8wSYaDdi28P2rgXL2mFpKdQciLvhggYtL9?cluster=devnet)
+- [Share Mint](https://explorer.solana.com/address/2JbUZbNPjZY7za8vouEwvE4QGKC6EPc6DE9qUm2zx7Fr?cluster=devnet)
+- [Fee Wallet](https://explorer.solana.com/address/2LaP4wNh5UNkWxDru8hwiVKkJXnANxVwkPhVY3mrTJ7F?cluster=devnet)
+- [Обновление программы](https://explorer.solana.com/tx/3na2ncVwNx8F3bz8dxPMvBg2EQrLt3xCQZCGazspytqpxcFmkfjC8G2PA3QYwTGEEQbErWHLyANGzE3KiUn8VXWL?cluster=devnet)
+- [Initialize Vault](https://explorer.solana.com/tx/22M6ZXJnQbT4g7LXeBNAp5C2G67WNy2chKf3C2u7U6vSYA5t3fKLzFNB2i85S1qBPPNBT1BCNv3WTUueNiJdm9Qu?cluster=devnet)
+- [Deposit A](https://explorer.solana.com/tx/XHpD68eQSX4g9KdkUojxFsEdHVd75ZuCFdpm4RGD8EYbX26t1eRNRRboGQVib8T4mxPtsFA9aEtEHF12X1KsSCG?cluster=devnet)
+- [Deposit B](https://explorer.solana.com/tx/2ZCHt1KhtpzgNCifeb1a136CaoY6ugU7CXxNbE6u898uvMHqrm34EEoo5gaZEcczVZv7CdnyyCXJe55qUqysvEnP?cluster=devnet)
+- [Deposit C](https://explorer.solana.com/tx/4MjHm8q7Q89vZDHQ9FPVRDoBnheK9GDJkTkiDP2K6LhgzAMqvVaa5gFrEF2hazMxt5y5C6gg7nkBqJJRSFg3hS5?cluster=devnet)
+
+### Тесты
+
+- Localnet: 19 passing (13s).
+- Devnet: 19 passing (53s).
+
+Результаты первых трёх депозитов:
+
+| Пользователь | Депозит | Комиссия | Shares | Доля |
+|---|---:|---:|---:|---:|
+| A | 100 | 1 | 99 | 28,57% |
+| B | 50 | 0,5 | 49,5 | 14,29% |
+| C | 200 | 2 | 198 | 57,14% |
+| Итого | 350 | 3,5 | 346,5 | 100% |
+
+Проверено:
+
+- токены переводятся в vault;
+- shares начисляются пропорционально;
+- комиссия поступает в Fee Wallet;
+- депозит без карточки запрещён;
+- нулевой депозит запрещён;
+- депозит меньше одного токена запрещён;
+- при паузе депозит невозможен;
+- при изменении баланса vault shares рассчитываются корректно.
+
+### Проверьте себя
+
+**Почему Transfer подписывает пользователь, а MintTo — PDA?**
+
+Пользователь владеет своим токен-аккаунтом, а VaultState PDA
+является mint authority для share-токенов.
+
+**Почему нельзя всегда выпускать shares в соотношении 1:1?**
+
+Баланс vault может изменяться независимо от количества shares.
+Пропорциональный расчёт учитывает текущую стоимость доли.
+
+**Зачем нужен Fee Wallet?**
+
+Для отдельного хранения комиссии, которая не учитывается
+при начислении shares.
+
+---
+
 ### Запуск
 
 ```
