@@ -5,7 +5,6 @@
 Program ID (devnet): `GUCvUxSVPPYudrxDT3RLf3ESEwmiFDJ273iwqoNm1YV2`
 
 ---
-
 ## Неделя 8. Каркас vault
 
 ### Что сделано
@@ -85,8 +84,8 @@ PDA — адрес, который считается из seeds и ID прог�
 **Как найти карточку конкретного пользователя?**
 Посчитать адрес по seeds `["user_card", vault_state, user]`. Хранить список пользователей не нужно: адрес карточки всегда можно вычислить заново.
 
----
 
+---
 ## Неделя 9. Депозит и выпуск share-токенов
 
 ### Что сделано
@@ -216,8 +215,76 @@ shares = net_amount * total_shares / total_tokens
 Для отдельного хранения комиссии, которая не учитывается
 при начислении shares.
 
----
 
+---
+## Неделя 10 — Withdraw & Burn Shares
+
+### Что сделано
+
+- Реализована инструкция `withdraw` — частичный вывод токенов.
+- Реализовано сжигание shares через CPI `Burn`.
+- Реализован возврат токенов через CPI `Transfer` с подписью PDA.
+- Добавлен пропорциональный расчёт суммы вывода.
+- Обновление баланса Vault и UserCard.
+- Проверка достаточного количества shares.
+- Защита от нулевого вывода и вывода из пустого Vault.
+
+### Формула вывода
+
+`tokens_out = shares_amount × total_tokens / total_shares`
+
+### Схема операции
+
+1. Пользователь указывает количество shares.
+2. Контракт рассчитывает количество возвращаемых токенов.
+3. Shares пользователя сжигаются.
+4. Токены переводятся из Vault пользователю.
+5. Обновляются данные VaultState и UserCard.
+
+### Мои доработки
+
+- `withdraw_all` — вывод всех доступных пользователю shares.
+- Закрытие пустой UserCard с возвратом rent.
+- Запрет вывода при активной паузе.
+- Проверка сохранности комиссии после вывода всех токенов.
+
+### Solana Explorer (Devnet)
+
+- [Program](https://explorer.solana.com/address/GUCvUxSVPPYudrxDT3RLf3ESEwmiFDJ273iwqoNm1YV2?cluster=devnet)
+- [Vault](https://explorer.solana.com/address/3CUgSCVN4UEwUExfrJ7Yz8sSKSZr4k8Ad7jHLKznhiXQ?cluster=devnet)
+- [Token Mint](https://explorer.solana.com/address/FSHWs51onNvKW62GpKKXsoWrHtSfBLaENe95XhrA9556?cluster=devnet)
+- [Share Mint](https://explorer.solana.com/address/HkjBVw8D6R5MjmFdVqcPvMpgcHZDQ6MoDKqLrdGXSTQ3?cluster=devnet)
+- [Fee Wallet](https://explorer.solana.com/address/3XK3QB6ZYYo5o6mSD3f4Eq969eoTFdjMr9Yxk3Gbrazg?cluster=devnet)
+- [Initialize Vault](https://explorer.solana.com/tx/6TYziVpAkUa4npPWXC7p9dyp7ixPrH7AC3ycHHi2mgMhkoePnm3YJn9zoRL88WwMhuVeZfwTGjhFKfx6mgCioog?cluster=devnet)
+- [Withdraw A — 50 shares → 100 tokens](https://explorer.solana.com/tx/33gd6DTAXEHRgyPGV38UmDwZTqoHD888kQdHotJn4d7g4VSbyWXw4E93jnoMfyWHm5iYro3jt1x5rgTtY3xNoJtr?cluster=devnet)
+- [Withdraw All B — 49.5 shares → 99 tokens](https://explorer.solana.com/tx/31MbamHMG3X7DZYXqwcoMr18H137M8QcW71V64jzWW8qqExNJ16eL4HUiWgNRtg8jcbEEnDXPAbfeUPuRwMYxJco?cluster=devnet)
+
+### Тестирование
+
+- Localnet: 28 passing (16s).
+- Devnet: 28 passing (1m).
+- Добавлено 9 новых тестов.
+- Проверены частичный и полный вывод, недостаток shares, нулевая сумма, пауза, отсутствие карточки, закрытие карточки и опустошение Vault.
+- В тестах искусственно увеличен баланс Vault для проверки пропорционального вывода в соотношении 2:1.
+
+### Проверьте себя
+
+**1. Какие CPI используются при выводе?**
+
+`Burn` — сжигание shares пользователя.  
+`Transfer` — перевод токенов из Vault пользователю.
+
+**2. Кто подписывает CPI?**
+
+Burn подписывает пользователь — владелец shares. Transfer авторизуется через PDA VaultState с использованием seeds и bump.
+
+**3. Почему администратор не может напрямую вывести токены из Vault?**
+
+Владельцем токен-аккаунта Vault является PDA, а не администратор. В реализованных инструкциях вывод осуществляется через сжигание shares и проверку аккаунтов пользователя.
+
+**Статус:** реализовано и протестировано в Localnet и Devnet. Используются тестовые токены.
+
+---
 ### Запуск
 
 ```
