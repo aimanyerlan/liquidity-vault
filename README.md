@@ -352,6 +352,105 @@ Cross-Program Invocation — вызов одной программы Solana и�
 
 Токен-аккаунт Vault контролируется PDA, а не администратором. В текущей реализации вывод возможен только через предусмотренную контрактом инструкцию со сжиганием shares и проверкой аккаунтов.
 
+---
+## Неделя 11 — свои токены и CLMM-пул на Raydium
+
+### Что сделано
+
+- Подключён Raydium SDK v2 (`0.2.41-alpha`).
+- Создан скрипт `scripts/create-clmm-pool.ts`.
+- Созданы два тестовых SPL-токена в Devnet.
+- Выпущено по 1 000 000 токенов каждого вида.
+- Создан собственный CLMM-пул Raydium.
+- Адреса токенов и пула сохранены в `devnet-pool.json`.
+- Смарт-контракт и функционал предыдущих недель сохранены без изменений.
+
+### Параметры пула
+
+| Параметр | Значение |
+|---|---|
+| Network | Devnet |
+| Pool type | CLMM |
+| Token pair | TOKEN_A / TOKEN_B |
+| Decimals | 6 |
+| Mint amount | 1 000 000 каждого токена |
+| Initial price | 1:1 |
+| Tick spacing | 60 |
+| Trade fee | 0.25% |
+
+### Схема работы скрипта
+
+```text
+create-clmm-pool.ts
+        |
+        v
+Создание TOKEN_A и TOKEN_B
+        |
+        v
+Mint тестовых токенов
+        |
+        v
+Получение Raydium AMM Config
+        |
+        v
+Создание CLMM Pool
+        |
+        v
+Сохранение devnet-pool.json
+```
+
+### Запуск
+
+```bash
+yarn install
+DEVNET_RPC=https://api.devnet.solana.com yarn create-pool
+```
+
+### Solana Explorer (Devnet)
+
+- [TOKEN_A](https://explorer.solana.com/address/AriRW57QNNSHEiqoCaiCZ78UUTwstrfDXBCf3iTE2YpZ?cluster=devnet)
+- [TOKEN_B](https://explorer.solana.com/address/G1Pn2x7iRkjG2ok9BW1m4tc26e6fN4Bueen97gbPG7jU?cluster=devnet)
+- [CLMM Pool](https://explorer.solana.com/address/3NQjUXCDL1j5tKMhpWv3yHpLU3xvN6aLRhWijngQienk?cluster=devnet)
+- [AMM Config](https://explorer.solana.com/address/CD4aJtX11cqTCAc83nxSPkkh5JW2yjD6uwHeovjqQ1qu?cluster=devnet)
+- [Raydium CLMM Program](https://explorer.solana.com/address/DRayAUgENGQBKVaX8owNhgzkEDyoHTGVEGHVJT1E9pfH?cluster=devnet)
+- [Create Pool Transaction](https://explorer.solana.com/tx/4MFdgBtgiQ86oijniKvLyHjEcsVzf9KTmAzgmLfPsqi54qmAbAqAdtZTWT2Gqk1LoGSKBRpnNe2ST4a6dQqgLd4V?cluster=devnet)
+
+### Результаты
+
+- [x] Создание TOKEN_A.
+- [x] Создание TOKEN_B.
+- [x] Получение AMM Config.
+- [x] Создание CLMM-пула.
+- [x] Сохранение адресов в JSON.
+- [x] Проверка исключения JSON из Git.
+
+```text
+Pool creation: success
+Execution time: 11.69s
+```
+
+### Проверьте себя
+
+**1. Что такое AMM?**
+
+Automated Market Maker — механизм автоматического обмена токенов через пул ликвидности без использования биржевого стакана.
+
+**2. Чем CLMM отличается от обычного AMM?**
+
+CLMM позволяет концентрировать ликвидность в определённом ценовом диапазоне вместо распределения по всему диапазону цен.
+
+**3. Что такое Tick Spacing?**
+
+Расстояние между допустимыми ценовыми тиками, используемыми для определения границ позиций ликвидности.
+
+**4. Для чего нужен devnet-pool.json?**
+
+Для хранения адресов тестовых токенов, CLMM-пула, AMM Config и транзакции создания пула. Эти данные будут использоваться на следующих неделях.
+
+**5. Можно ли выполнить swap сразу после создания пула?**
+
+Нет, для обмена необходимо наличие активной ликвидности. На этой неделе создан только пул.
+
 
 ---
 ### Запуск

@@ -22,3 +22,5 @@ devnet-wallet.json
 .DS_Store
 .vscode/
 .idea/
+
+devnet-pool.json
