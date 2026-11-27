@@ -1,154 +1,97 @@
-# Simple Vault — практика Anchor
+# Liquidity Vault
 
-Учебный контракт на Anchor 0.31.1 (Solana). Сейчас он делает две вещи:
+Сквозной учебный проект по Solana (недели 8–15). Основа — шаблон преподавателя 0xnurda/vault-dev.
 
-1. **Vault создан** — админ создаёт vault для SPL-токена.
-2. **У каждого пользователя своя «карточка»** — пользователь создаёт личный аккаунт (PDA) внутри vault.
-
-Контракт будет дорабатываться (депозиты, вывод и т.д.), поэтому сейчас он намеренно минимальный.
+Program ID (devnet): `GUCvUxSVPPYudrxDT3RLf3ESEwmiFDJ273iwqoNm1YV2`
 
 ---
 
-## Что делает контракт
+## Неделя 8. Каркас vault
+
+### Что сделано
+
+Написала каркас vault на Anchor 0.31.1. Админ создаёт vault для одного SPL-токена: сразу появляются настройки vault, хранилище токенов и share-токен. Каждый пользователь может создать свою карточку внутри vault. Денег пока никто не вносит, это только структура аккаунтов, на которой будут стоять депозит и вывод следующих недель.
+
+### Схема аккаунтов
 
 ```
-initialize_vault    создаёт VaultState PDA, vault token account и share mint
-create_user_card    создаёт UserCard PDA — личную карточку пользователя в vault
+admin (кошелёк)
+  │ вызывает initialize_vault и платит за аккаунты
+  ▼
+VaultState (PDA)
+  ├── authority ──► vault_tokens (токен-аккаунт: сюда лягут внесённые токены)
+  ├── mint authority ──► share_mint (share-токен, 6 знаков)
+  └── на него ссылается ──► UserCard (PDA, по одной на каждого пользователя)
 ```
 
-### `initialize_vault`
+| Аккаунт | Seeds | Что хранит | Кто им распоряжается |
+|---|---|---|---|
+| VaultState | `["vault", token_mint]` | admin, token_mint, адреса хранилища и share mint, bump, paused | программа; паузу ставит только админ |
+| vault_tokens | `["vault_tokens", token_mint]` | внесённые токены | VaultState (PDA) |
+| share_mint | `["share_mint", token_mint]` | share-токены | VaultState (PDA) — единственный mint authority |
+| UserCard | `["user_card", vault_state, user]` | vault, owner, bump, created_at | пользователь, закрыть может только он |
 
-Вызывает админ (платит за аккаунты). Создаёт три аккаунта для выбранного `token_mint`:
+Главная идея недели: хранилищем и share-токеном владеет PDA `VaultState`. У PDA нет приватного ключа, поэтому подписать за неё может только сама программа. Ни админ, ни кто-то другой не может своей подписью забрать токены или напечатать share-токены.
 
-| Аккаунт | Seeds | Что хранит |
+### Инструкции
+
+| Инструкция | Кто вызывает | Что делает |
 |---|---|---|
-| `vault_state` | `["vault", token_mint]` | admin, token_mint, адреса token account и share mint, bump |
-| `vault_token_account` | `["vault_tokens", token_mint]` | токен-аккаунт, владелец — vault PDA |
-| `share_mint` | `["share_mint", token_mint]` | mint для shares (6 decimals), authority — vault PDA |
+| `initialize_vault` | админ | создаёт VaultState, хранилище и share mint |
+| `create_user_card` | пользователь | создаёт карточку; на паузе падает с ошибкой `VaultPaused` |
+| `close_user_card` | владелец карточки | закрывает карточку, рента возвращается ему |
+| `set_paused(bool)` | только админ | включает и выключает паузу |
 
-### `create_user_card`
+### Мои доработки к заданию
 
-Вызывает любой пользователь (платит за свою карточку). Создаёт `UserCard`:
+- `created_at`: в карточке хранится время создания (`Clock::get()?.unix_timestamp`).
+- `close_user_card`: закрытие карточки с возвратом ренты (`close = user`). Seeds включают адрес пользователя, поэтому чужую карточку закрыть нельзя.
+- `paused`: флаг в VaultState и инструкция `set_paused`. Работает только для админа (`has_one = admin`), при паузе новые карточки не создаются.
 
-| Поле | Описание |
-|---|---|
-| `vault` | к какому vault относится карточка |
-| `owner` | владелец карточки |
-| `bump` | bump PDA |
+### Ссылки в Explorer (devnet)
 
-Seeds: `["user_card", vault_state, user]` — поэтому у одного пользователя в одном vault
-может быть **только одна** карточка. Повторный вызов завершится ошибкой.
+Адреса из одного запуска `yarn test` (каждый запуск создаёт новый vault).
 
----
+- Программа: https://explorer.solana.com/address/GUCvUxSVPPYudrxDT3RLf3ESEwmiFDJ273iwqoNm1YV2?cluster=devnet
+- Токен vault (тестовый): https://explorer.solana.com/address/3xpkSK5W2n3QN7TajMdMN4cfo3w2gxQNR966KD46X5ux?cluster=devnet
+- VaultState: https://explorer.solana.com/address/JDDnXB2X2JXap1p1iMhayA3DEDnmw6Co8T73QFa5A4rC?cluster=devnet
+- Хранилище токенов: https://explorer.solana.com/address/JBEjXMNjzaC1aW3KQuK3X21v2URAjq1j9EATp62qzj8n?cluster=devnet
+- Share mint: https://explorer.solana.com/address/FrvkDzt2AZCAudwzijeZ2M7wgA7853nAHgk5zUhW5qz5?cluster=devnet
+- Карточка пользователя A: https://explorer.solana.com/address/2Ae2itUf3jjeEe4z5XqncWKkC2rmpRRACdiruf9BmvRc?cluster=devnet
+- Карточка пользователя B: https://explorer.solana.com/address/HhZQNH2U5EtzyCZZ728pcsCTr1SWxt7DSdQuXjSUddko?cluster=devnet
+- Транзакция `initialize_vault`: https://explorer.solana.com/tx/3fLXmccP1TsMq5SeFfqCHwiTGewDw4hbGH2jbmE1VdyVco7KBKrDtf9AGJpsmsGgczG7qZ2oQABPTh5NdUUh4xHN?cluster=devnet
+- Транзакция `create_user_card` (A): https://explorer.solana.com/tx/55N7CSy9JxtateqxJbVUMp7Xsh2QtW4prMKTSUrTD1bwa9fPjNv2mUJe72Z4zAiaWdT9Kr1sAVE1WPiqnHeAV7jP?cluster=devnet
+- Транзакция `create_user_card` (B): https://explorer.solana.com/tx/5Js53CtGUoP7tJvcqMZxXqRiWDSeNWa9mM55QoAHxtibp3hCYqKmkq3LTDdUoPskSnXUqzEvge3qiiQTG6ferzek?cluster=devnet
 
-## Требования
+### Тесты
 
-| Инструмент | Версия | Установка |
-|---|---|---|
-| Rust | stable | https://rustup.rs |
-| Solana CLI | 1.18+ | https://docs.solana.com/cli/install-solana-cli-tools |
-| Anchor CLI | 0.31.1 | `cargo install --git https://github.com/coral-xyz/anchor avm --locked && avm install 0.31.1 && avm use 0.31.1` |
-| Node.js | 18+ | https://nodejs.org |
-| Yarn | any | `npm i -g yarn` |
+`yarn test` на devnet: 6 passing.
 
-Rust-зависимости (`anchor-lang`, `anchor-spl` 0.31.1) подтянутся сами при `anchor build`.
-JS-зависимости (`@coral-xyz/anchor`, `@solana/web3.js`, `@solana/spl-token`, `mocha`, `chai`, `typescript`) — через `yarn install`.
+- vault создаётся;
+- у каждого пользователя своя карточка;
+- вторая карточка для того же пользователя — ошибка;
+- карточка закрывается, рента возвращается;
+- не админ не может поставить паузу;
+- при паузе карточку создать нельзя, после снятия паузы можно.
 
----
+### Проверьте себя
 
-## Быстрый старт
+**Почему share-токен выпускает программа, а не администратор?**
+Mint authority share-токена — PDA VaultState, а не кошелёк админа. Если бы токены мог печатать админ, он выпустил бы себе share-токены и забрал чужие деньги. Программа печатает их только в коде депозита, по правилам.
 
-### 1. Установить зависимости
+**Что такое PDA и почему у неё нет приватного ключа?**
+PDA — адрес, который считается из seeds и ID программы. Его специально выбирают так, чтобы он не лежал на кривой Ed25519, поэтому подходящего приватного ключа не существует. Подписать за такой адрес может только программа, которой он принадлежит.
 
-```bash
-cd vault-simple
+**Как найти карточку конкретного пользователя?**
+Посчитать адрес по seeds `["user_card", vault_state, user]`. Хранить список пользователей не нужно: адрес карточки всегда можно вычислить заново.
+
+### Запуск
+
+```
 yarn install
-```
-
-### 2. Сбилдить контракт
-
-```bash
 anchor build
-```
-
-Если билдишь **первый раз** (новый keypair):
-
-```bash
-anchor keys sync   # обновит declare_id! в lib.rs и Anchor.toml
-anchor build       # пересобрать с правильным ID
-```
-
-Артефакты в `target/deploy/`:
-- `simple_vault.so` — программа
-- `simple_vault-keypair.json` — keypair (не коммитить!)
-
-### 3. Настроить Solana CLI на devnet
-
-```bash
-solana config set --url devnet
-solana address     # твой публичный ключ — запомни его
-solana balance
-```
-
-### 4. Пополнить кошелёк
-
-Для деплоя нужно ~2 SOL.
-
-```bash
-solana airdrop 2   # может не сработать из-за rate limit
-```
-
-Если rate limit — используй faucet:
-- https://faucet.solana.com (вставь свой адрес)
-
-### 5. Задеплоить
-
-```bash
 anchor deploy --provider.cluster devnet
-```
-
-### 6. Запустить тесты
-
-```bash
 yarn test
 ```
 
-Ожидаемый вывод:
-
-```
-✔ initialize_vault: vault создан
-✔ create_user_card: у каждого пользователя своя карточка
-✔ create_user_card: вторая карточка для того же пользователя — ошибка
-3 passing
-```
-
----
-
-## Структура проекта
-
-```
-vault-simple/
-├── programs/simple_vault/src/lib.rs   # контракт
-├── tests/vault.ts                     # тесты
-├── Anchor.toml
-├── Cargo.toml
-└── package.json
-```
-
----
-
-## Частые ошибки
-
-| Ошибка | Причина | Решение |
-|---|---|---|
-| `Insufficient funds` при деплое | мало SOL | пополни кошелёк на devnet |
-| `AccountNotInitialized` в тестах | программа не задеплоена или другой ID | `anchor keys sync` → `anchor build` → `anchor deploy` |
-| `already in use` при `create_user_card` | у пользователя уже есть карточка | это ожидаемо, карточка одна на пользователя |
-
----
-
-## Задания для практики
-
-1. Добавить в `UserCard` поле `created_at` (`Clock::get()?.unix_timestamp`).
-2. Добавить инструкцию `close_user_card`, которая закрывает карточку и возвращает ренту владельцу.
-3. Запретить создание карточек, если vault поставлен админом на паузу (флаг `paused` в `VaultState`).
+Кошелёк берётся из `~/.config/solana/id.json`. Ключи и seed-фразы в репозиторий не коммитятся (см. `.gitignore`).
