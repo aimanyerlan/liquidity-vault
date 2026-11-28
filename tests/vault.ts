@@ -20,7 +20,7 @@ import {
 import { assert } from "chai";
 import { SimpleVault } from "../target/types/simple_vault";
 
-describe("simple_vault — Week 8 & 9", () => {
+describe("simple_vault — Weeks 8–10", () => {
   const provider = anchor.AnchorProvider.env();
   anchor.setProvider(provider);
 
@@ -577,5 +577,77 @@ describe("simple_vault — Week 8 & 9", () => {
     assert.equal(card.shares.toNumber(), 148.5 * UNIT);
     assert.equal(vault.totalTokens.toNumber(), 792 * UNIT);
     assert.equal(vault.totalShares.toNumber(), 396 * UNIT);
+  });
+
+  // WEEK 10 — после теста изменения цены: 792 tokens / 396 shares.
+  function withdrawalAccounts(user: Keypair) {
+    const key = user.publicKey.toBase58();
+    return { vaultState: vaultStatePDA, userCard: cardPda(user.publicKey),
+      vaultTokenAccount: vaultTokenAccountPDA, shareMint: shareMintPDA,
+      userTokenAccount: tokenAccounts.get(key)!, userShareAccount: shareAccounts.get(key)!,
+      user: user.publicKey } as any;
+  }
+  const withdraw = (user: Keypair, amount: number) => program.methods
+    .withdraw(tokens(amount)).accounts(withdrawalAccounts(user)).signers([user]).rpc();
+  const withdrawAll = (user: Keypair) => program.methods
+    .withdrawAll().accounts(withdrawalAccounts(user)).signers([user]).rpc();
+  async function checkVault(assets: number, shares: number) {
+    const state = await program.account.vaultState.fetch(vaultStatePDA);
+    assert.equal(state.totalTokens.toNumber(), assets * UNIT);
+    assert.equal(state.totalShares.toNumber(), shares * UNIT);
+    assert.equal(Number((await getAccount(provider.connection, vaultTokenAccountPDA)).amount), assets * UNIT);
+    assert.equal(Number((await getMint(provider.connection, shareMintPDA)).supply), shares * UNIT);
+  }
+  it("withdraw: A burns 50 shares and receives 100 tokens", async () => {
+    const key = userA.publicKey.toBase58();
+    const before = (await getAccount(provider.connection, tokenAccounts.get(key)!)).amount;
+    console.log("Withdraw A transaction:", await withdraw(userA, 50));
+    const after = (await getAccount(provider.connection, tokenAccounts.get(key)!)).amount;
+    assert.equal(Number(after - before), 100 * UNIT);
+    assert.equal(Number((await getAccount(provider.connection, shareAccounts.get(key)!)).amount), 98.5 * UNIT);
+    const card = await program.account.userCard.fetch(cardPda(userA.publicKey));
+    assert.equal(card.shares.toNumber(), 98.5 * UNIT);
+    assert.equal(card.deposited.toNumber(), 98 * UNIT);
+    await checkVault(692, 346);
+  });
+  it("withdraw: zero rejected", async () => {
+    await expectError(() => withdraw(userA, 0), "ZeroAmount");
+  });
+  it("withdraw: insufficient shares rejected", async () => {
+    await expectError(() => withdraw(userA, 99), "InsufficientShares");
+  });
+  it("withdraw: paused vault rejected", async () => {
+    await setPaused(true);
+    try { await expectError(() => withdraw(userA, 1), "VaultPaused"); }
+    finally { await setPaused(false); }
+  });
+  it("withdraw_all: B receives 99 tokens", async () => {
+    console.log("Withdraw all B transaction:", await withdrawAll(userB));
+    const key = userB.publicKey.toBase58();
+    assert.equal(Number((await getAccount(provider.connection, tokenAccounts.get(key)!)).amount), 1049 * UNIT);
+    assert.equal(Number((await getAccount(provider.connection, shareAccounts.get(key)!)).amount), 0);
+    const card = await program.account.userCard.fetch(cardPda(userB.publicKey));
+    assert.equal(card.shares.toNumber(), 0);
+    assert.equal(card.deposited.toNumber(), 0);
+    await checkVault(593, 296.5);
+  });
+  it("close_user_card: B closes card after withdrawal and receives rent", async () => {
+    const card = cardPda(userB.publicKey);
+    const before = await provider.connection.getBalance(userB.publicKey);
+    await program.methods.closeUserCard().accounts({vaultState: vaultStatePDA, userCard: card, user: userB.publicKey} as any).signers([userB]).rpc();
+    assert.isNull(await program.account.userCard.fetchNullable(card));
+    assert.isAbove(await provider.connection.getBalance(userB.publicKey), before);
+  });
+  it("withdraw: without card rejected", async () => {
+    await expectError(() => withdraw(userB, 1));
+  });
+  it("withdraw_all: A and C empty vault, fee wallet unchanged", async () => {
+    await withdrawAll(userA);
+    await withdrawAll(userC);
+    await checkVault(0, 0);
+    assert.equal(Number((await getAccount(provider.connection, feeWalletPDA)).amount), 4.5 * UNIT);
+  });
+  it("withdraw: empty vault rejected", async () => {
+    await expectError(() => withdraw(userA, 1), "VaultEmpty");
   });
 });

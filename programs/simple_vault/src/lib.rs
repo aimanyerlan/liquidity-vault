@@ -1,5 +1,5 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::{self, Mint, MintTo, Token, TokenAccount, Transfer};
+use anchor_spl::token::{self, Burn, Mint, MintTo, Token, TokenAccount, Transfer};
 
 declare_id!("GUCvUxSVPPYudrxDT3RLf3ESEwmiFDJ273iwqoNm1YV2");
 
@@ -51,10 +51,7 @@ pub mod simple_vault {
 
     // Закрытие пустой карточки пользователя
     pub fn close_user_card(ctx: Context<CloseUserCard>) -> Result<()> {
-        require!(
-            ctx.accounts.user_card.deposited == 0 && ctx.accounts.user_card.shares == 0,
-            VaultError::CardNotEmpty
-        );
+        require!(ctx.accounts.user_card.shares == 0, VaultError::CardNotEmpty);
 
         msg!("User card closed");
 
@@ -199,6 +196,81 @@ pub mod simple_vault {
 
         Ok(())
     }
+    pub fn withdraw(ctx: Context<Withdraw>, shares_amount: u64) -> Result<()> {
+        redeem(ctx, shares_amount)
+    }
+
+    pub fn withdraw_all(ctx: Context<Withdraw>) -> Result<()> {
+        let amount = ctx.accounts.user_share_account.amount;
+        redeem(ctx, amount)
+    }
+}
+
+// Общая логика вывода учебных токенов.
+fn redeem(ctx: Context<Withdraw>, shares_amount: u64) -> Result<()> {
+    let vault = &mut ctx.accounts.vault_state;
+    require!(!vault.paused, VaultError::VaultPaused);
+    require!(shares_amount > 0, VaultError::ZeroAmount);
+    let total_tokens = ctx.accounts.vault_token_account.amount;
+    let total_shares = ctx.accounts.share_mint.supply;
+    require!(total_shares > 0, VaultError::VaultEmpty);
+    require!(
+        shares_amount <= ctx.accounts.user_share_account.amount,
+        VaultError::InsufficientShares
+    );
+    let tokens_out = (shares_amount as u128)
+        .checked_mul(total_tokens as u128)
+        .and_then(|v| v.checked_div(total_shares as u128))
+        .and_then(|v| u64::try_from(v).ok())
+        .ok_or(VaultError::MathOverflow)?;
+    require!(tokens_out > 0, VaultError::WithdrawTooSmall);
+
+    token::burn(
+        CpiContext::new(
+            ctx.accounts.token_program.to_account_info(),
+            Burn {
+                mint: ctx.accounts.share_mint.to_account_info(),
+                from: ctx.accounts.user_share_account.to_account_info(),
+                authority: ctx.accounts.user.to_account_info(),
+            },
+        ),
+        shares_amount,
+    )?;
+
+    let mint = vault.token_mint;
+    let bump = [vault.bump];
+    let seeds: &[&[u8]] = &[b"vault", mint.as_ref(), &bump];
+    token::transfer(
+        CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            Transfer {
+                from: ctx.accounts.vault_token_account.to_account_info(),
+                to: ctx.accounts.user_token_account.to_account_info(),
+                authority: vault.to_account_info(),
+            },
+            &[seeds],
+        ),
+        tokens_out,
+    )?;
+
+    vault.total_tokens = total_tokens
+        .checked_sub(tokens_out)
+        .ok_or(VaultError::MathOverflow)?;
+    vault.total_shares = total_shares
+        .checked_sub(shares_amount)
+        .ok_or(VaultError::MathOverflow)?;
+    let card = &mut ctx.accounts.user_card;
+    card.shares = card.shares.saturating_sub(shares_amount);
+    card.deposited = card.deposited.saturating_sub(tokens_out);
+    if card.shares == 0 {
+        card.deposited = 0;
+    }
+    msg!(
+        "Withdraw: {} shares -> {} tokens",
+        shares_amount,
+        tokens_out
+    );
+    Ok(())
 }
 
 // ============================================================
@@ -405,6 +477,69 @@ pub struct Deposit<'info> {
     pub token_program: Program<'info, Token>,
 }
 
+#[derive(Accounts)]
+pub struct Withdraw<'info> {
+    /// Состояние Vault
+    #[account(
+        mut,
+        seeds = [b"vault", vault_state.token_mint.as_ref()],
+        bump = vault_state.bump,
+        has_one = vault_token_account,
+        has_one = share_mint,
+    )]
+    pub vault_state: Account<'info, VaultState>,
+
+    /// Карточка пользователя
+    #[account(
+        mut,
+        seeds = [
+            b"user_card",
+            vault_state.key().as_ref(),
+            user.key().as_ref()
+        ],
+        bump = user_card.bump,
+        constraint = user_card.owner == user.key(),
+        constraint = user_card.vault == vault_state.key(),
+    )]
+    pub user_card: Account<'info, UserCard>,
+
+    /// Токен-аккаунт Vault
+    #[account(
+        mut,
+        constraint = vault_token_account.mint == vault_state.token_mint,
+        constraint = vault_token_account.owner == vault_state.key(),
+    )]
+    pub vault_token_account: Account<'info, TokenAccount>,
+
+    /// Mint share-токенов
+    #[account(mut)]
+    pub share_mint: Account<'info, Mint>,
+
+    /// Исходный токен-аккаунт пользователя
+    #[account(
+        mut,
+        constraint = user_token_account.owner == user.key(),
+        constraint = user_token_account.mint == vault_state.token_mint,
+        constraint = user_token_account.key() != vault_state.fee_wallet
+            @ VaultError::InvalidTokenAccount,
+        constraint = user_token_account.key() != vault_token_account.key()
+            @ VaultError::InvalidTokenAccount,
+    )]
+    pub user_token_account: Account<'info, TokenAccount>,
+
+    /// Аккаунт пользователя для получения shares
+    #[account(
+        mut,
+        constraint = user_share_account.owner == user.key(),
+        constraint = user_share_account.mint == share_mint.key(),
+    )]
+    pub user_share_account: Account<'info, TokenAccount>,
+
+    pub user: Signer<'info>,
+
+    pub token_program: Program<'info, Token>,
+}
+
 // ============================================================
 // Errors
 // ============================================================
@@ -417,7 +552,7 @@ pub enum VaultError {
     #[msg("Only admin can do this")]
     NotAdmin,
 
-    #[msg("Deposit amount must be greater than zero")]
+    #[msg("Amount must be greater than zero")]
     ZeroAmount,
 
     #[msg("Deposit is too small to mint shares")]
@@ -440,6 +575,12 @@ pub enum VaultError {
 
     #[msg("Invalid or duplicate token account")]
     InvalidTokenAccount,
+    #[msg("Vault is empty")]
+    VaultEmpty,
+    #[msg("Withdraw amount too small")]
+    WithdrawTooSmall,
+    #[msg("Insufficient shares")]
+    InsufficientShares,
 }
 
 // ============================================================
