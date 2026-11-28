@@ -362,6 +362,46 @@ Cross-Program Invocation — вызов одной программы Solana и�
 
 
 ---
+## Неделя 11. Свои токены и CLMM-пул на Raydium (devnet)
+
+### Что сделано
+
+Создала два тестовых токена (по 6 знаков, заминтила себе по 1 000 000), создала CLMM-пул TOKEN_A / TOKEN_B на Raydium devnet и вручную открыла одну позицию. Контракт vault на этой неделе не менялся: всё делается скриптами в `scripts/`.
+
+- `scripts/create-clmm-pool.ts` (`yarn create-pool`): токены и пул.
+- `scripts/open-clmm-position.ts` (`yarn open-position`): позиция в диапазоне вокруг цены.
+- `scripts/fill-position-addresses.ts`: достаёт адреса NFT и позиции из транзакции.
+
+### Адреса (devnet)
+
+| Что | Адрес |
+|-----|-------|
+| TOKEN_A | `AriRW57QNNSHEiqoCaiCZ78UUTwstrfDXBCf3iTE2YpZ` ([Explorer](https://explorer.solana.com/address/AriRW57QNNSHEiqoCaiCZ78UUTwstrfDXBCf3iTE2YpZ?cluster=devnet)) |
+| TOKEN_B | `G1Pn2x7iRkjG2ok9BW1m4tc26e6fN4Bueen97gbPG7jU` ([Explorer](https://explorer.solana.com/address/G1Pn2x7iRkjG2ok9BW1m4tc26e6fN4Bueen97gbPG7jU?cluster=devnet)) |
+| Пул | `3NQjUXCDL1j5tKMhpWv3yHpLU3xvN6aLRhWijngQienk` ([Explorer](https://explorer.solana.com/address/3NQjUXCDL1j5tKMhpWv3yHpLU3xvN6aLRhWijngQienk?cluster=devnet)) |
+| Конфиг комиссий | `CD4aJtX11cqTCAc83nxSPkkh5JW2yjD6uwHeovjqQ1qu` (шаг тика 60, комиссия 0.25%) |
+| NFT позиции | `DHLLmk19eSCA4RPfEenA1W2yojUfPYuYu7d4RzgFN6Tm` ([Explorer](https://explorer.solana.com/address/DHLLmk19eSCA4RPfEenA1W2yojUfPYuYu7d4RzgFN6Tm?cluster=devnet)) |
+| Аккаунт позиции | `GV1kj8cRiS3aVoRu5T7mDhyFmZr7nBPcTX5gnzNGdgcW` ([Explorer](https://explorer.solana.com/address/GV1kj8cRiS3aVoRu5T7mDhyFmZr7nBPcTX5gnzNGdgcW?cluster=devnet)) |
+| Tx создания пула | `4MFdgBtgiQ86oijniKvLyHjEcsVzf9KTmAzgmLfPsqi54qmAbAqAdtZTWT2Gqk1LoGSKBRpnNe2ST4a6dQqgLd4V` [Explorer](https://explorer.solana.com/tx/4MFdgBtgiQ86oijniKvLyHjEcsVzf9KTmAzgmLfPsqi54qmAbAqAdtZTWT2Gqk1LoGSKBRpnNe2ST4a6dQqgLd4V?cluster=devnet) |
+| Tx открытия позиции | `5x2SCYvauwMj9GzbRA3xM8RPSJqXfhe3FVfEUavQatwruP1bTpcZ6fGWnbk7iYYcJQcdq8wHC5CXpneReV9howKh` [Explorer](https://explorer.solana.com/tx/5x2SCYvauwMj9GzbRA3xM8RPSJqXfhe3FVfEUavQatwruP1bTpcZ6fGWnbk7iYYcJQcdq8wHC5CXpneReV9howKh?cluster=devnet) |
+
+### Цена и диапазон
+
+- Текущая цена пула: **1** (1 TOKEN_A = 1 TOKEN_B).
+- Диапазон позиции: тики от **-6960 до 6960**, то есть цены примерно от **0.4986 до 2.0056** (вниз и вверх в 2 раза от текущей цены).
+- В позицию вложено 10 000 TOKEN_A и около 10 000 TOKEN_B (максимум 10 067 с запасом на проскальзывание 1%).
+
+**Почему такой диапазон.** Он симметричный и широкий: на тестовом пуле цена почти не двигается, и позиция долго останется внутри диапазона, то есть будет работать на неделях 12-13 при обменах. Узкий диапазон давал бы больше комиссий, но цена чаще выходила бы за него, и позицию пришлось бы переставлять. Границы кратны шагу тика 60.
+
+### Проверьте себя
+
+**Чем концентрированная ликвидность отличается от простого пула?** В простом пуле ликвидность распределена по всем ценам, а в CLMM я сама выбираю диапазон, и деньги работают только пока цена внутри него. Комиссий с тех же денег больше.
+
+**Что происходит с позицией, когда цена выходит за диапазон?** Позиция перестаёт участвовать в обменах и не зарабатывает комиссии, пока цена не вернётся или я не переставлю диапазон. Вся ликвидность при этом лежит в одном из двух токенов.
+
+**Почему узкий диапазон зарабатывает больше, но требует больше внимания?** Ликвидность сконцентрирована около цены, поэтому с каждого обмена приходится больше комиссий, но цена выходит из такого диапазона чаще.
+
+---
 ### Запуск
 
 ```

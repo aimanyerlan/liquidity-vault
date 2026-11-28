@@ -22,3 +22,8 @@ devnet-wallet.json
 .DS_Store
 .vscode/
 .idea/
+
+devnet-pool.json
+# Build and test logs
+build.log
+unit-test.log
